@@ -1,0 +1,135 @@
+---
+title: "STA2201 Week 1 Lab"
+author: "Yeonjoon Choi"
+date: "2023-01-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Lab Exercises
+
+1. Plot the ratio of male to female mortality rates over time for ages 10,20,30 and 40 (different color for each age) and change the theme 
+2. Find the age that has the highest female mortality rate each year 
+3. Use the `summarize(across())` syntax to calculate the standard deviation of mortality rates by age for the Male, Female and Total populations. 
+4. The Canadian HMD also provides population sizes over time (https://www.prdh.umontreal.ca/BDLC/data/ont/Population.txt). Use these to calculate the population weighted average mortality rate separately for males and females, for every year. Make a nice line plot showing the result (with meaningful labels/titles) and briefly comment on what you see (1 sentence). Hint: `left_join` will probably be useful here. 
+
+
+Part 1.
+
+```{r}
+require(tidyverse)
+dm = read_table("https://www.prdh.umontreal.ca/BDLC/data/ont/Mx_1x1.txt", 
+                skip = 2, col_types = "dcddd")
+
+
+#We get the mortality ratio for each age
+data =  dm |>
+    filter(Age == 10|Age == 20| Age == 30| Age ==40)|>
+    select(Year:Male)|>
+    mutate(ratio = Male/Female)
+
+data
+
+#We plot the data
+data |>
+  ggplot(aes(Year, ratio))+
+  geom_point(aes(colour = Age))+
+  theme_bw()+
+  labs(title = "Ratio of Male-to-Female Mortality, from 1921 to 2019")+
+  ylab ("Mortality Ratio")
+
+
+```
+
+Part 2.
+
+```{r}
+#We group by Year first
+grouped_year = dm |>
+  group_by(Year)
+
+#and find the age that has
+#the max mortality each year
+mortality_age = summarize(grouped_year, 
+          Max_Age=Age[which.max(Female)])
+
+
+#We will see the first 10 years and the last 10 years 
+head(mortality_age, n =10)
+
+tail(mortality_age, n =10)
+
+
+```
+
+
+Part 3
+
+```{r}
+
+#We group by age
+grouped_age = dm |>
+  group_by(Age)
+
+#and calculate the standard deviation
+summarize(grouped_age, across(Female:Total, sd))
+          
+
+```
+
+
+
+Part 4
+
+```{r}
+pop_data = read_table("https://www.prdh.umontreal.ca/BDLC/data/ont/Population.txt",
+                      skip = 2)
+death_data = read_table("https://www.prdh.umontreal.ca/BDLC/data/ont/Mx_1x1.txt", 
+                        skip = 2, col_types = "dcddd")
+
+death_data = death_data|>
+  select(-Total)|>
+  pivot_longer(Female:Male, names_to = "sex", values_to = "mortality")
+
+#death data has no 2020 data
+#so we remove any data after 2020
+#from the data set
+pop_data = pop_data|>
+  select(-Total)|>
+  filter(Year < 2020)|>
+  pivot_longer(Female:Male, names_to = "sex", values_to = "Population")
+
+
+death_data$population = pop_data$Population
+
+#Calculate the weight for the weighted average
+death_data = death_data |>
+  mutate(weight = mortality*population)
+
+
+#Calculate weighted average
+
+to_plot = death_data |>
+  group_by(Year, sex) |>
+  summarize(weighted_mean = sum(weight, na.rm = TRUE)/sum(population, na.rm = TRUE))
+
+
+#Plotting 
+
+to_plot |>
+ggplot(aes(Year, weighted_mean, colour = sex))+
+ geom_point()+
+  geom_line()+
+  labs(title = "Mortality Rate for Female and Male, 1921-2019")+
+  ylab("Mortality Rate")+
+  theme_bw()
+
+  
+```
+
+We see that male mortality rate is higher than female mortality rate, but we also see that the difference shrunk as time went on. 
