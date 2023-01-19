@@ -1,0 +1,377 @@
+---
+title: "Week 2 Lab"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+1. Using the `delay_2022` data, plot the five stations with the highest mean delays. Facet the graph by `line`
+2. Using the `opendatatoronto` package, download the data on mayoral campaign contributions for 2014. Hints:
+    + find the ID code you need for the package you need by searching for 'campaign' in the `all_data` tibble above
+    + you will then need to `list_package_resources` to get ID for the data file
+    + note: the 2014 file you will get from `get_resource` has a bunch of different campaign contributions, so just keep the data that relates to the Mayor election
+3. Clean up the data format (fixing the parsing issue and standardizing the column names using `janitor`)
+4. Summarize the variables in the dataset. Are there missing values, and if so, should we be worried about them? Is every variable in the format it should be? If not, create new variable(s) that are in the right format.
+5. Visually explore the distribution of values of the contributions. What contributions are notable outliers? Do they share a similar characteristic(s)? It may be useful to plot the distribution of contributions without these outliers to get a better sense of the majority of the data. 
+6. List the top five candidates in each of these categories:
+    + total contributions
+    + mean contribution
+    + number of contributions
+7. Repeat 5 but without contributions from the candidates themselves.
+8. How many contributors gave money to more than one candidate? 
+
+
+
+```{r}
+#| message: false
+library(opendatatoronto)
+library(tidyverse)
+library(stringr)
+library(skimr) # EDA
+library(visdat) # EDA
+library(janitor)
+library(lubridate)
+library(ggrepel)
+```
+
+```{r}
+all_data <- list_packages(limit = 500)
+head(all_data)
+```
+
+```{r}
+res <- list_package_resources("996cfe8d-fb35-40ce-b569-698d51fc683b") # obtained code from searching data frame above
+res <- res |> mutate(year = str_extract(name, "202.?"))
+delay_2022_ids <- res |> filter(year==2022) |> select(id) |> pull()
+delay_2022 <- get_resource(delay_2022_ids)
+# make the column names nicer to work with
+delay_2022 <- clean_names(delay_2022)
+```
+Let's also download the delay code and readme, as reference. 
+
+1.
+
+
+Get the five stations with the highest mean delay.
+
+```{r}
+temp = delay_2022 |>
+  group_by(line)
+  
+summarize(temp, Mean_Delay = mean(min_delay)) |>
+            arrange(desc(Mean_Delay))
+```
+
+So we see that SRT, BD, SHP, YU, and NA(possible representing the case where we do not know where the delay was, even though there was a delay) have the highest mean delay.
+
+```{r}
+top_5_mean = delay_2022 |>
+  filter(line == "SRT"|line == "BD"|line == "SHP"|line == "YU"|is.na(line))
+ggplot(data = top_5_mean)+
+  geom_histogram(aes(x=min_delay))+
+  scale_x_log10()+
+  facet_wrap(~line)+
+  labs(title = "Histogram of minute delays in five lines with the highest mean delay")+
+  xlab("Minutes Delayed")+
+  theme_bw()
+  
+```
+
+2.
+
+```{r}
+library(opendatatoronto)
+#search by title
+campaign_package = search_packages("campaign contributions 2014")
+
+#get the id
+id_2014 = campaign_package$id
+
+temp = list_package_resources(id_2014)
+
+temp
+#5b230e92-0a22-4a15-9572-0b19cc222985 is the id 
+
+mayor_2014 = get_resource("5b230e92-0a22-4a15-9572-0b19cc222985")$`2_Mayor_Contributions_2014_election.xls`
+
+head(mayor_2014)
+
+```
+
+We will clean the data set in 3.
+
+3.
+
+```{r}
+library(janitor)
+#we can fix the parsing issue
+mayor_2014 = row_to_names(mayor_2014, row_number= 1)
+
+head(mayor_2014)
+
+#and standardize the column names 
+mayor_2014 = clean_names(mayor_2014)
+
+head(mayor_2014)
+
+```
+
+
+4.
+
+We can first check for missing values using skim package. 
+```{r}
+skim(mayor_2014)
+```
+
+We first see that the ward variable is useless as all the values are missing. We also remove other variables that have that have $99 \%$ of the values missing, except the 8th column which describes the relationship of the contributor to the candidate. 
+
+```{r}
+mayor_2014 = mayor_2014 |>
+  select(-c(2,6,9,10,13))
+```
+
+The relationship to candidate column is relevant. 
+
+```{r}
+mayor_2014$relationship_to_candidate[which(!is.na(mayor_2014$relationship_to_candidate))]
+```
+
+We want to know whether or not candidate made any contribution for 7. Hence, we make a new column where it's 1 if the candidate contributed themselves, and 0 otherwise. 
+
+```{r}
+#replace NA with FALSE
+mayor_2014$relationship_to_candidate[which(is.na(mayor_2014$relationship_to_candidate))]=
+  FALSE
+#make a column of 1 if the contributor is candidate
+#0 otherwise
+mayor_2014 = mayor_2014 |>
+  mutate(relationship = ifelse(relationship_to_candidate == "Candidate",1,0)) |>
+  select(-6)
+```
+
+Contribution amount should be in numeric.
+
+```{r}
+mayor_2014$contribution_amount=as.numeric(mayor_2014$contribution_amount)
+```
+
+
+The "Office" variable has the same value for each data point, so we may remove it. 
+
+```{r}
+unique(mayor_2014$office)
+mayor_2014 = mayor_2014 |>
+  select(-7)
+```
+
+We will first look at summary statistics for the contribution amount.
+
+```{r}
+summary(mayor_2014$contribution_amount)
+```
+
+The median is smaller than the mean by 308 dollars, so this may suggest some higher-end donations that skew the distribution. 
+
+The maximum of 508225 dollars is also notable. 
+
+Next, we will look at composition of the contribution type.
+
+```{r}
+unique(mayor_2014$contribution_type_desc)
+
+temp = mayor_2014$contribution_type_desc
+#percentage of monetary donation 
+(length(which(temp == "Monetary"))/length(temp) )*100
+
+```
+
+And we look at the composition of the contributor type. 
+
+```{r}
+unique(mayor_2014$contributor_type_desc)
+
+temp = mayor_2014$contributor_type_desc
+#percentage of individual donation 
+(length(which(temp == "Individual"))/length(temp) )*100
+
+```
+
+
+5.
+
+
+We first graph a histogram of the contribution amounts.
+
+```{r}
+ggplot(data = mayor_2014, aes(x=contribution_amount))+
+  geom_histogram()
+
+```
+
+The histogram breaks because of outliers. We will remove contributions of more than 50000 dollars. There are 2 of them.
+
+```{r}
+length(which(mayor_2014$contribution_amount > 50000))
+
+temp = mayor_2014 |>
+  filter(contribution_amount <=50000)
+
+
+ggplot(data = temp)+
+  geom_histogram(aes(x=contribution_amount))+
+  xlab("Contribution Amount")+
+  scale_x_log10()+
+  labs(title = "Histogram of Contribution Amount")+
+  theme_bw()
+
+
+#We can also plot it on the log-scale
+#in which case we do not need to remove the outlier
+
+ggplot(data = mayor_2014)+
+  geom_histogram(aes(x=contribution_amount))+
+  xlab("Contribution Amount")+
+  scale_x_log10()+
+  labs(title = "Histogram of Contribution Amount, log-scale")+
+  theme_bw()
+
+```
+
+Notably, there's an outlier with the contribution of 508224.73.
+
+```{r}
+mayor_2014 |>
+  filter(contribution_amount == 508224.73)
+
+```
+
+This contribution turns out to be Doug Ford self-financing his own campaign. 
+
+A frequency table can also be interesting. We print top 15 contribution amount with respect to frequency. 
+
+
+```{r}
+sort(table(mayor_2014$contribution_amount), decreasing = TRUE)[1:15]
+```
+
+
+Another thing of interest is the number of "small" contribution. OpenSecrets, a non-profit organization that tracks campaign financing, defines small contributions as contribution of less than 200 dollars. So we will use this definition. 
+
+```{r}
+small = length(which(mayor_2014$contribution_amount < 200))
+
+#the percentage of small contribution
+
+small/nrow(mayor_2014) * 100
+
+```
+
+So less than half of the donations were "small" contributions. 
+
+
+6.
+
+```{r}
+temp = mayor_2014 |>
+  group_by(candidate)
+
+total_contribution = temp|>
+  summarize(Total = sum(contribution_amount))|>
+  arrange(desc(Total))
+
+total_contribution
+```
+
+So the top five candidates in total contribution is Tory, Chow, Ford, Doug, Ford Rob, and Stintz.
+
+
+
+```{r}
+temp = mayor_2014 |>
+  group_by(candidate)
+
+mean_contribution = temp|>
+  summarize(Mean = mean(contribution_amount))|>
+  arrange(desc(Mean))
+
+mean_contribution
+```
+
+So the top five candidates in mean contribution is Sniedzin, Syed, Ritch, Ford, Doug and Clarke.
+
+
+
+```{r}
+temp = mayor_2014 |>
+  group_by(candidate)
+
+num_contribution = temp|>
+  summarize(num = length(contribution_amount))|>
+  arrange(desc(num))
+
+num_contribution
+```
+
+So the top five candidates in number of contribution is Chow, TOry, Ford, Doug, Ford, Rob and Soknacki. 
+
+
+7.
+
+We remove donation made by the candidates themselves 
+```{r}
+temp = mayor_2014 |>
+  filter(relationship == 0)
+
+#the maximum donation is now 3660. 
+
+max(temp$contribution_amount)
+```
+
+We plot the histograms again, with outliers removed. The distributions look similar, but the plot is better visually as the bins do not have to spread far apart. 
+
+```{r}
+ggplot(data = temp)+
+  geom_histogram(aes(x=contribution_amount))+
+  xlab("Contribution Amount")+
+  scale_x_log10()+
+  labs(title = "Histogram of Contribution Amount")+
+  theme_bw()
+
+
+#We can also plot it on the log-scale
+
+ggplot(data = mayor_2014)+
+  geom_histogram(aes(x=contribution_amount))+
+  xlab("Contribution Amount")+
+  scale_x_log10()+
+  labs(title = "Histogram of Contribution Amount, log-scale")+
+  theme_bw()
+
+```
+
+8.
+
+Since it's possible for two people to have the same name, we first filter by the address. We will assume that people with the same name and the same address is a one person, even though it's possible that two people with the same name are living in the same address. 
+```{r}
+#choosing contributor address that appears twice. 
+temp = mayor_2014|>
+  group_by(contributors_postal_code)|>
+  filter(length(contributors_postal_code) > 1)
+
+#We then group by name, choosing people that appear twice. 
+
+temp = temp|>
+  group_by(contributors_name)|>
+  filter(length(contributors_name)>1)
+
+#the number of people who made more than one contribution is 
+
+length(unique(temp$contributors_name))
+```
