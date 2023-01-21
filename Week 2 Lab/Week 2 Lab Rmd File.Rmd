@@ -1,9 +1,9 @@
 ---
 title: "Week 2 Lab"
 output:
-  pdf_document: default
   html_document:
     df_print: paged
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -319,14 +319,14 @@ num_contribution = temp|>
 num_contribution
 ```
 
-So the top five candidates in number of contribution is Chow, TOry, Ford, Doug, Ford, Rob and Soknacki. 
+So the top five candidates in number of contribution is Chow, Tory, Ford, Doug, Ford, Rob and Soknacki. 
 
 
 7.
 
 We remove donation made by the candidates themselves 
 ```{r}
-temp = mayor_2014 |>
+remove_candidate = mayor_2014 |>
   filter(relationship == 0)
 
 #the maximum donation is now 3660. 
@@ -334,27 +334,50 @@ temp = mayor_2014 |>
 max(temp$contribution_amount)
 ```
 
-We plot the histograms again, with outliers removed. The distributions look similar, but the plot is better visually as the bins do not have to spread far apart. 
+We repeat Q6.
 
 ```{r}
-ggplot(data = temp)+
-  geom_histogram(aes(x=contribution_amount))+
-  xlab("Contribution Amount")+
-  scale_x_log10()+
-  labs(title = "Histogram of Contribution Amount")+
-  theme_bw()
+temp = remove_candidate |>
+  group_by(candidate)
 
+total_contribution = temp|>
+  summarize(Total = sum(contribution_amount))|>
+  arrange(desc(Total))
 
-#We can also plot it on the log-scale
-
-ggplot(data = mayor_2014)+
-  geom_histogram(aes(x=contribution_amount))+
-  xlab("Contribution Amount")+
-  scale_x_log10()+
-  labs(title = "Histogram of Contribution Amount, log-scale")+
-  theme_bw()
-
+total_contribution
 ```
+
+So the top five candidates in total contribution is Tory, Chow, Ford, Doug, Stintz, Rob, Ford.
+
+
+
+```{r}
+temp = remove_candidate|>
+  group_by(candidate)
+
+mean_contribution = temp|>
+  summarize(Mean = mean(contribution_amount))|>
+  arrange(desc(Mean))
+
+mean_contribution
+```
+
+So the top five candidates in mean contribution is Ritch, Sniedzins, Tory, Gardner, and Tiwari. 
+
+
+
+```{r}
+temp = remove_candidate |>
+  group_by(candidate)
+
+num_contribution = temp|>
+  summarize(num = length(contribution_amount))|>
+  arrange(desc(num))
+
+num_contribution
+```
+
+So the top five candidates in number of contribution is Chow, Tory, Ford, Doug, Ford, Rob and Soknacki. 
 
 8.
 
