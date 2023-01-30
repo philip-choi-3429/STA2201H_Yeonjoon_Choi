@@ -21,7 +21,7 @@ Then, the likelihood is $L(\theta|x_1, \ldots x_{129}) = \prod_{i=1}^{129} \thet
 
 $$L(\theta) = \theta^{118}(1-\theta)^{11}$$. 
 
-The log-likelihood is $118 \log \theta+ 11 \log(1-\theta)$, and differentiating, we obtain $\frac{118}{\theta}-\frac{11}{1-\theta}$. Setting $\frac{118}{\theta}+\frac{11}{1-\theta} = 0$, we get $\theta = \frac{118}{129}$. 
+The log-likelihood is $118 \log \theta+ 11 \log(1-\theta)$, and differentiating, we obtain $\frac{118}{\theta}-\frac{11}{1-\theta}$. Setting $\frac{118}{\theta}+\frac{11}{1-\theta} = 0$, we get $\theta = \frac{118}{129} \approx 0.9147$. 
 
 The second derivative is $\frac{-118}{\theta^2}-\frac{11}{(1-\theta)^2} < 0$ at $\theta = \frac{118}{129}$. Hence, the maximum likelihood estimate is $\hat \theta = \frac{118}{129}$. 
 
@@ -61,7 +61,7 @@ print (c(lb, ub))
 
 Now assume a Beta(10,10) prior on $\theta$. What is the interpretation of this prior? Are we assuming we know more, less or the same amount of information as the prior used in Question 2?
 
-We may interpret the prior in the sense that we had $9$(a woman says she is happy) success and $9$ failure(a woman says she is unhappy). We're assuming that we know more. In Beta(1,1) prior, we're saying we have no prior information, since we have $0$ success and $0$ failure. But in Beta(10,10) distribution, we have prior information of $9$ success and $9$ failure, so we have more certainty in $\theta$ being around $0.5$. We can see this from the graph of probability density function of Beta(1,1) and Beta(10,10).
+We may interpret the prior in the sense that in a previous experiment, we had $9$ successes (a woman says she is happy) and $9$ failures(a woman says she is unhappy). We're assuming that we know more. In Beta(1,1) prior, we're saying we have no prior information, since we have $0$ success and $0$ failure. But in Beta(10,10) distribution, we have prior information of $9$ success and $9$ failure, so we have more certainty in $\theta$ being around $0.5$. We can see this from the graph of probability density function of Beta(1,1) and Beta(10,10).
 
 ```{r}
 x = seq(from = 0, to =1, by = 0.001)
@@ -104,22 +104,9 @@ lhood = dbinom(pt, size = 129, p)
 
 x = data.frame(x = p, y =lhood)
 
-ggplot(x, aes(x))+
-  geom_point(aes(y = y))+
-  xlab("Possible Theta Value")+
-  ylab("Likelihood")+
-  labs(title = "Likelihood plotted at each possible theta")+
-  theme_bw()
-```
 
-As expected, the likelihood peaks around $0.9$(and we know by MLE estimation that it peaks at $118/129$), since our data suggests such high $\theta$. 
-
-The posterior distribution for question 2 is Beta(119, 12), and the posterior distribution for question 3 is proportional to $\theta^{118} (1-\theta)^{11} \theta^9 (1-\theta)^9 = \theta^127 (1-\theta)^20$, which means the posterior distribution will be Beta(128,21).  
-
-
-```{r}
 x = seq(from = 0, to =1, by = 0.001)
-x_data = data.frame(x)
+x_data = data.frame(x, lhood = lhood)
 ggplot(x_data,aes(x))+
   stat_function(fun = dbeta, args = list(shape1 = 1, shape2 = 1), 
                 aes(color = "Prior for Question 2"))+
@@ -129,13 +116,19 @@ ggplot(x_data,aes(x))+
                 aes(color = "Posterior for Question 2"))+
   stat_function(fun = dbeta, args = list(shape1 = 128, shape2 = 21), 
                 aes(color = "Posterior for Question 3"))+
-  labs(title= "Posterior and Prior Distributions")+
+  geom_line(aes(y = lhood, color = "Likelihood"))+
+  labs(title= "Posterior, Prior Distributions and Likelihood")+
+  ylab("y")+
+  xlab("Possible Parameter Value")+
   theme_bw()
 
-  
 ```
 
-We see that with question 3 having a more informative prior that has a peak at $0.5$, the posterior distribution is less right skewed compared to the posterior distribution of question 2. Since in the prior for question 3, we had some certainty that $\theta$ was around $0.5$, the posteiror distribution will have a peak closer to $0.5$ compared to the posterior distribution of question 2. 
+As expected, the likelihood peaks around $0.9$(and we know by MLE estimation that it peaks at $118/129$), since our data suggests such high $\theta$. 
+
+The posterior distribution for question 2 is Beta(119, 12), and the posterior distribution for question 3 is proportional to $\theta^{118} (1-\theta)^{11} \theta^9 (1-\theta)^9 = \theta^{127} (1-\theta)^{20}$, which means the posterior distribution will be Beta(128,21).  
+
+We see that with question 3 having a more informative prior that has a peak at $0.5$, the posterior distribution peaks closer to $0.5$ compared to the posterior distribution of question 2. Since in the prior for question 3, we had some certainty that $\theta$ was around $0.5$, the posterior distribution will have a peak closer to $0.5$ compared to the posterior distribution of question 2. 
 
 ## Question 5
 
