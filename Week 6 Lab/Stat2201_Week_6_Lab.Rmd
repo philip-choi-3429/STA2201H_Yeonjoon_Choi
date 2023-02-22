@@ -1,0 +1,686 @@
+---
+title: "Week 6 Lab Submission"
+author: "Yeonjoon Choi"
+date: "2023-02-21"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+ Introduction
+
+This lab will be looking at trying to replicate some of the visualizations in the lecture notes, involving prior and posterior predictive checks, and LOO model comparisons. 
+
+The dataset is a 0.1% of all births in the US in 2017. I've pulled out a few different variables, but as in the lecture, we'll just focus on birth weight and gestational age. 
+
+# The data
+
+Read it in, along with all our packages. 
+
+```{r}
+library(tidyverse)
+library(here)
+# for bayes stuff
+library(rstan)
+library(bayesplot) 
+library(loo) 
+library(tidybayes) 
+require(curl)
+gurl = "https://raw.githubusercontent.com/MJAlexander/applied-stats-2023/main/data/births_2017_sample.RDS"
+ds = readRDS(url(gurl, method="libcurl"))
+head(ds)
+```
+
+Brief overview of variables:
+
+- `mager` mum's age
+- `mracehisp` mum's race/ethnicity see here for codes: https://data.nber.org/natality/2017/natl2017.pdf page 15
+- `meduc` mum's education see here for codes: https://data.nber.org/natality/2017/natl2017.pdf page 16
+- `bmi` mum's bmi 
+- `sex` baby's sex
+- `combgest` gestational age in weeks
+- `dbwt` birth weight in kg
+- `ilive` alive at time of report y/n/ unsure
+
+I'm going to rename some variables, remove any observations with missing gestational age or birth weight, restrict just to babies that were alive, and make a preterm variable. 
+
+```{r}
+ds <- ds %>% 
+  rename(birthweight = dbwt, gest = combgest) %>% 
+  mutate(preterm = ifelse(gest<32, "Y", "N")) %>% 
+  filter(ilive=="Y",gest< 99, birthweight<9.999)
+```
+
+
+## Question 1
+
+Use plots or tables to show three interesting observations about the data. Remember:
+
+- Explain what your graph/ tables show
+- Choose a graph type that's appropriate to the data type
+- If you use `geom_smooth`, please also plot the underlying data
+
+Feel free to replicate one of the scatter plots in the lectures as one of the interesting observations, as those form the basis of our models. 
+
+
+```{r}
+ggplot(data = ds, aes(y = birthweight, x = gest, color = preterm))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  xlab("Gestational Age in Weeks")+
+  ylab("Birth Weight in kg")+
+  labs(title = "Gestational Age and Birth Weight")+
+  scale_color_manual(name="Preterm",
+                       labels=c("No","Yes"),
+                       values=c("red","blue"))+
+  theme_bw()
+```
+
+From the plot, we see clear increase in birth weight as there is increase in gestational age. We also suspect that there is difference in effect of gestational age on birth weight, depending on whether or not the birth was preterm. The plot suggests that there is a possible interaction effect by the preterm variable. 
+
+We also note that there are less data points for preterm babies. 
+
+From the CDC's webpage, BMI of over 30 is defined as obesity: https://www.cdc.gov/obesity/basics/adult-defining.html
+
+We add a categorical variable for obesity, with the variable being Y if the mother's BMI was over 30, and N otherwise.
+
+```{r}
+ds = ds|>
+  mutate(Obesity=ifelse(bmi<30, "N", "Y"))
+```
+
+There are 1182 observations with Obesity equal to Y, and 2660 with Obesity equal to N. 
+
+We plot a boxplot for baby's birth weight, divded into obesity group and non-obesity group. 
+
+```{r}
+ggplot(ds, aes(x=Obesity, y=birthweight)) + 
+  geom_boxplot()+
+  xlab("Obesity")+
+  ylab("Birth weight")+
+  labs(title = "Birth weight and Obesity")+
+  scale_x_discrete(labels = c("No Obesity", "Obesity"))+
+  theme_bw()
+
+  
+```
+
+
+In the boxplot, there is a small difference in the mean of obesity group and non-obesity group. We perform a t-test to see if the difference in mean is significant. 
+
+We also perform Mann–Whitney U test, which is a non-parametric test where the null hypothesis is that two groups come from the same distribution, as there are cases where t-test may fail due to the underlying distribution of the data. 
+
+
+```{r}
+require(pander)
+pander(t.test(birthweight~Obesity, data = ds, conf.int = TRUE))
+
+pander(wilcox.test(birthweight~Obesity, data = ds, conf.int=TRUE))
+```
+
+So we do see that the difference in mean is significant, in both t-test and Mann–Whitney U test.
+
+
+
+
+There has been studies showing some relations between low birth weight risk and race. In particular, these studies claimed that African American women were more likley to have babies with low birth weight. 
+
+-https://mhnpjournal.biomedcentral.com/articles/10.1186/s40748-018-0084-2
+
+-https://www.nejm.org/doi/full/10.1056/nejm199710233371706
+
+(Note that first study used data from 2005-2014, and the second study used data from 1980-1995, while we are using data from 2017. We are not claiming definitive link between race and low birth weight, but we believe it is still worth investigating.)
+
+We plot violin plot for the birth weight, for black mothers and non-black mothers. There were 574 black mothers. Violin plot shows the probability density of the data, fitted using kernel density estimators. Inside the violin plot, we plot a boxplot to show the mean and the interquartile range. 
+
+```{r}
+
+ds = ds|>
+  mutate(Black = ifelse(mracehisp ==2 , "Y", "N") )
+
+
+ggplot(ds, aes(x=Black, y=birthweight)) + 
+  geom_violin()+
+  geom_boxplot(width=0.25)+
+  xlab("Race")+
+  ylab("Birth weight")+
+  labs(title = "Mother's Race and Birth weight")+
+  scale_x_discrete(labels = c("Non-Black", "Black"))+
+  theme_bw()
+
+```
+
+From the plot, we notice that the mean birth weight is higher for non-black group, with the density peaking at a higher birth weight compared to the black group. We also notice that the tail end for the black group for low birth weight is thicker compared to the non-black group. However, this may be due to lower sample size in the black group. 
+
+We can perform t-test and Mann–Whitney U test like before.  
+
+```{r}
+pander(t.test(birthweight~Black, data = ds, conf.int = TRUE))
+
+pander(wilcox.test(birthweight~Black, data = ds, conf.int=TRUE))
+```
+
+Both test agrees that the difference is significant.
+
+From WHO, low birth weight is defined as weight at birth less than 2.5 kg: https://www.who.int/data/nutrition/nlis/info/low-birth-weight
+
+We add a column for low birth weight, with the variable being Y if the baby weighed less than 2.5kg, and N otherwise. 
+
+```{r}
+ds = ds|>
+  mutate(low.birth = ifelse(birthweight<2.5, "Y", "N") )
+```
+
+There are 313 cases of low birth weight. 
+
+We want to see if Black Americans are more at risk for low birth weight. 
+
+```{r}
+temp = table(ifelse(ds$Black == "Y", "Black", "Non-Black"), 
+             ifelse(ds$low.birth == "Y", "Low Birth Weight", "No Low Birth Weight"))
+
+temp_2 = as.data.frame.table(temp)
+p1 = ggplot(temp_2, aes(fill=Var2, y=Freq, x=Var1)) + 
+    geom_col(position = "fill")+
+     scale_fill_manual(name="Low Birth Weight",
+                       labels=c("Yes","No"),
+                       values=c("red","blue"))+
+    xlab("Race")+
+    ylab("Percentage Frequency")+
+    labs(title = "Percentage Frequency of Low Birth Weight \n in Different Race Groups")+
+    theme_bw()
+
+p2 = ggplot(temp_2, aes(fill=Var2, y=Freq, x=Var1)) + 
+    geom_bar(stat = "identity")+
+   scale_fill_manual(name="Low Birth Weight",
+                       labels=c("Yes","No"),
+                       values=c("red","blue"))+
+    xlab("Race")+
+    ylab("Frequency")+
+    labs(title = "Frequency of Low Birth Weight\n in Different Race Groups")+
+    theme_bw()
+
+require(gridExtra)
+grid.arrange(p1,p2, ncol = 2)
+
+```
+
+We see that in percentage, low birth weight happened more frequently for Black Americans. 
+
+We print out the two-way table for race and low birth weight. 
+
+```{r}
+temp = table(ifelse(ds$Black == "Y", "Black", "Non-Black"), 
+             ifelse(ds$low.birth == "Y", "Low Birth Weight", "No Low Birth Weight"))
+
+
+require(knitr)
+
+kable(temp)
+```
+
+We test if the proportion of low birth weight among the two race group are the same.
+
+```{r}
+pander(prop.test(x = c(77, 236), n = c(574, 3268), correct = FALSE))
+```
+
+From the test result, we see that the proportion of low birth weight in Black Americans is significantly higher compared to other race group. 
+
+From this, we see that race may play a role in decrease in birth weight. In particular, it seems that Black Americans are more likely to have low birth weight compared to other races. 
+
+# The model
+
+As in lecture, we will look at two candidate models 
+
+Model 1 has log birth weight as a function of log gestational age
+
+$$
+\log(y_i) \sim N(\beta_1 + \beta_2\log(x_i), \sigma^2)
+$$
+
+Model 2 has an interaction term between gestation and prematurity
+
+$$
+\log(y_i) \sim N(\beta_1 + \beta_2\log(x_i) + \beta_2 z_i + \beta_3\log(x_i) z_i, \sigma^2)
+$$
+
+- $y_i$ is weight in kg
+- $x_i$ is gestational age in weeks, CENTERED AND STANDARDIZED
+- $z_i$ is preterm (0 or 1, if gestational age is less than 32 weeks)
+
+
+# Prior predictive checks
+
+Let's put some weakly informative priors on all parameters i.e. for the $\beta$s
+
+$$
+\beta \sim N(0, 1)
+$$
+
+and for $\sigma$
+
+$$
+\sigma \sim N^+(0,1)
+$$
+where the plus means positive values only i.e. Half Normal. 
+
+Let's check to see what the resulting distribution of birth weights look like given Model 1 and the priors specified above, assuming we had no data on birth weight (but observations of gestational age).
+
+## Question 2
+
+For Model 1, simulate values of $\beta$s and $\sigma$ based on the priors above. Do 1000 simulations. Use these values to simulate (log) birth weights from the likelihood specified in Model 1, based on the set of observed gestational weights. **Remember the gestational weights should be centered and standardized**. 
+
+- Plot the resulting distribution of simulated (log) birth weights. 
+- Plot ten simulations of (log) birthweights against gestational age. 
+
+
+We plot the histogram of the generated birth weights. 
+
+```{r}
+set.seed(28192)
+beta_1 = rnorm(1000, mean =0,sd= 1)
+beta_2 = rnorm(1000,mean=0,sd=1)
+sigma = abs(rnorm(1000,mean=0,sd=1))
+
+prior_check = rnorm(1000, mean = beta_1+beta_2*scale(log(ds$gest))[1:1000], sd = sigma)
+
+hist(prior_check, xlab = "Log(Weight)", 
+     main = "Prior Predictive Check", breaks = 20)
+```
+
+
+We plot the first ten data points. 
+```{r}
+plot(prior_check[1:10]~scale(log(ds$gest))[1:10], 
+     xlab=("Log Gestational Age(Standardized)"), ylab=("Log Birth Weight"),
+     main=("Log Birth Weight and Gestational Age(Prior Predictive Check)"))
+```
+
+
+# Run the model
+
+Now we're going to run Model 1 in Stan. The stan code is in the `code/models` folder. 
+
+First, get our data into right form for input into stan. 
+
+```{r}
+ds$log_weight <- log(ds$birthweight)
+ds$log_gest_c <- (log(ds$gest) - mean(log(ds$gest)))/sd(log(ds$gest))
+# put into a list
+stan_data <- list(N = nrow(ds),
+                  log_weight = ds$log_weight,
+                  log_gest = ds$log_gest_c)
+```
+
+Now fit the model
+
+```{r}
+mod1 <- stan(data = stan_data, 
+             file = here("simple_weight.stan"),
+             iter = 500,
+             seed = 243)
+```
+
+```{r}
+summary(mod1)$summary[c("beta[1]", "beta[2]", "sigma"),]
+```
+
+## Question 3
+
+Based on model 3, give an estimate of the expected birthweight of a baby who was born at a gestational age of 37 weeks. 
+
+We can output the following point prediction(which is in Kg, not in log weight), using the mean of each parameter in the posterior samples.  
+
+```{r}
+exp(1.1624783+0.1437529*(log(37)-mean(log(ds$gest)))/sd(log(ds$gest)))
+
+```
+
+We can also plot the posterior estimates. 
+
+```{r}
+post_samples = extract(mod1)
+
+
+hist(exp(post_samples[["beta"]][,1]+((log(37)-mean(log(ds$gest)))/sd(log(ds$gest)))*post_samples[["beta"]][,2]), 
+     xlab = "Posterior Samples",
+     ylab = "Frequency", 
+     main = "Posterior Estimates for Gestational Week = 37")
+
+```
+
+## Question 4
+
+Write a stan model to run Model 2, and run it. 
+
+My stan file is in outside the all the folders in my github. You will find a file named model_2_week_6.stan in my github. 
+
+
+```{r}
+ds$log_weight = log(ds$birthweight)
+ds$log_gest_c = (log(ds$gest) - mean(log(ds$gest)))/sd(log(ds$gest))
+# put into a list
+stan_data <- list(N = nrow(ds),
+                  log_weight = ds$log_weight,
+                  log_gest = ds$log_gest_c,
+                  preterm = ifelse(ds$preterm == "Y",1,0))
+
+
+my_mod2 = stan(data = stan_data, 
+             file = here("model_2_week_6.stan"),
+             iter = 1500,
+             seed = 243)
+```
+
+
+
+## Question 5
+
+For reference I have uploaded some model 2 results. Check your results are similar. 
+
+```{r}
+load(here("mod2.Rda"))
+summary(mod2)$summary[c(paste0("beta[", 1:4, "]"), "sigma"),]
+```
+
+My result
+```{r}
+summary(my_mod2)$summary[c("beta[1]", "beta[2]","beta[3]", "beta[4]", "sigma"),]
+```
+
+The results are indeed similar. 
+
+# PPCs
+
+Now we've run two candidate models let's do some posterior predictive checks. The `bayesplot` package has a lot of inbuilt graphing functions to do this. For example, let's plot the distribution of our data (y) against 100 different datasets drawn from the posterior predictive distribution:
+
+```{r}
+set.seed(1856)
+y <- ds$log_weight
+yrep1 <- extract(mod1)[["log_weight_rep"]]
+yrep2 <- extract(mod2)[["log_weight_rep"]] 
+dim(yrep1)
+samp100 <- sample(nrow(yrep1), 100)
+ppc_dens_overlay(y, yrep1[samp100, ])  + ggtitle("distribution of observed versus predicted birthweights")
+```
+
+For each posterior sample, we create a data set of length 3842. We have 1000 posterior samples, so we obtain 1000 data set of of length 3842. 
+
+## Question 6
+
+Make a similar plot to the one above but for model 2, and **not** using the bayes plot in built function (i.e. do it yourself just with `geom_density`)
+
+
+
+```{r}
+set.seed(32222)
+samp100 = sample(nrow(yrep2), 100)
+
+
+p = ggplot()
+
+for (i in 1:100){
+  p = p+geom_density(aes_string(x = yrep2[samp100[i], ]))
+}
+
+
+p = p+
+  geom_density(aes(x = log_weight, color="red"), data = ds, linewidth =2)+
+  theme(legend.position="none")+
+  xlab("Log Birth Weight")+
+  ylab("Density")+
+  labs(title = "Distribution of observed versus predicted birthweights")+
+  geom_label(aes(x=0.5, y=1, label="Red line: Observed"), color="red") +
+  geom_label(aes(x=0.5, y=2, label="Black lines: Predicted"), color="black") 
+
+
+
+
+
+p
+```
+
+And we can compare with the output using ppc_dens_overlay
+```{r}
+ppc_dens_overlay(y, yrep2[samp100, ])  + ggtitle("distribution of observed versus predicted birthweights")
+
+```
+## Test statistics
+
+We can also look at some summary statistics in the PPD versus the data, again either using `bayesplot` -- the function of interest is `ppc_stat` or `ppc_stat_grouped` -- or just doing it ourselves using ggplot. 
+
+E.g. medians by prematurity for Model 1
+
+```{r}
+ppc_stat_grouped(ds$log_weight, yrep1, group = ds$preterm, stat = 'median')
+```
+
+## Question 7
+
+Use a test statistic of the proportion of births under 2.5kg. Calculate the test statistic for the data, and the posterior predictive samples for both models, and plot the comparison (one plot per model).
+
+
+```{r}
+test_stat = length(which(ds$low.birth =="Y"))/nrow(ds)
+
+test_mod_1 = rep(NA,1000)
+
+for (i in 1:1000){
+  test_mod_1[i] = length(which(exp(yrep1[i, ])<2.5))/nrow(ds)
+}
+
+test_mod_2 = rep(NA,500)
+
+for (i in 1:500){
+  test_mod_2[i] = length( which(exp(yrep2[i, ])<2.5))/nrow(ds)
+}
+
+
+p1 = ggplot(mapping = aes(test_mod_1))+
+  geom_histogram()+
+  geom_vline(xintercept = test_stat)+
+  xlim(c(0.08, 0.13))+
+  xlab("value")+
+  annotate("text", x = test_stat+0.003, y = 10, label = "Observed Statistics", vjust = -1, color = "red")+
+  labs(title = "Model 1: Low Birth Weight Proportion")
+
+
+
+p2 = ggplot(mapping = aes(test_mod_2))+
+  geom_histogram()+
+  geom_vline(xintercept = test_stat)+
+  xlim(c(0.08, 0.13))+
+  xlab("value")+
+  annotate("text", x = test_stat+0.003, y = 10, label = "Observed Statistics", vjust = -1, color = "red")+
+  labs(title = "Model 2: Low Birth Weight Proportion")
+
+grid.arrange(p1,p2)
+
+```
+
+# LOO
+
+Finally let's calculate the LOO elpd for each model and compare. The first step of this is to get the point-wise log likelihood estimates from each model:
+
+```{r}
+loglik1 <- extract(mod1)[["log_lik"]]
+loglik2 <- extract(mod2)[["log_lik"]]
+```
+
+
+And then we can use these in the `loo` function to get estimates for the elpd. Note the `save_psis = TRUE` argument saves the calculation for each simulated draw, which is needed for the LOO-PIT calculation below. 
+
+```{r}
+loo1 <- loo(loglik1, save_psis = TRUE)
+loo2 <- loo(loglik2, save_psis = TRUE)
+```
+
+Look at the output:
+
+
+```{r}
+loo1
+loo2
+```
+
+Comparing the two models tells us Model 2 is better:
+
+```{r}
+loo_compare(loo1, loo2)
+```
+
+We can also compare the LOO-PIT of each of the models to standard uniforms. The both do pretty well. 
+
+```{r}
+ppc_loo_pit_overlay(yrep = yrep1, y = y, lw = weights(loo1$psis_object))
+ppc_loo_pit_overlay(yrep = yrep2, y = y, lw = weights(loo2$psis_object))
+```
+
+## Bonus question (not required)
+
+Create your own PIT histogram "from scratch" for Model 2. 
+
+
+```{r}
+
+```
+
+## Question 8
+
+Based on the original dataset, choose one (or more) additional covariates to add to the linear regression model. Run the model in Stan, and compare with Model 2 above on at least 2 posterior predictive checks.
+
+
+We added a covariate for whether or not mother had BMI over 30, and a covariate for whether or not the mother was black. 
+
+```{r}
+ds$log_weight = log(ds$birthweight)
+ds$log_gest_c = (log(ds$gest) - mean(log(ds$gest)))/sd(log(ds$gest))
+# put into a list
+stan_data <- list(N = nrow(ds),
+                  log_weight = ds$log_weight,
+                  log_gest = ds$log_gest_c,
+                  preterm = ifelse(ds$preterm == "Y",1,0),
+                  black = ifelse(ds$Black == "Y",1,0),
+                  obesity = ifelse(ds$Obesity == "Y",1,0))
+
+
+my_mod3 = stan(data = stan_data, 
+             file = here("model_3_week_6.stan"),
+             iter = 1500,
+             seed = 243)
+```
+
+
+Here is the fit. 
+
+```{r}
+summary(my_mod3)$summary[c("beta[1]", "beta[2]","beta[3]", "beta[4]", "beta[5]", "beta[6]", "sigma"),]
+```
+
+
+We do a posterior predictive check with proportion of low birth weight and median. 
+
+```{r}
+yrep2 = extract(my_mod2)[["log_weight_rep"]]
+yrep3 = extract(my_mod3)[["log_weight_rep"]]
+
+
+
+test_stat = length(which(ds$low.birth =="Y"))/nrow(ds)
+
+test_mod_2 = rep(NA,3000)
+
+for (i in 1:3000){
+  test_mod_2[i] = length(which(exp(yrep2[i, ])<2.5))/nrow(ds)
+}
+
+test_mod_3 = rep(NA,3000)
+
+for (i in 1:3000){
+  test_mod_3[i] = length( which(exp(yrep3[i, ])<2.5))/nrow(ds)
+}
+
+
+p1 = ggplot(mapping = aes(test_mod_2))+
+  geom_histogram()+
+  geom_vline(xintercept = test_stat)+
+  xlab("value")+
+  annotate("text", x = test_stat-0.003, y = 200, label = "Observed Statistics", vjust = -1)+
+  labs(title = "Model 2: Low Birth Weight Proportion")
+
+
+
+p2 = ggplot(mapping = aes(test_mod_3))+
+  geom_histogram()+
+  geom_vline(xintercept = test_stat)+
+  xlab("value")+
+  annotate("text", x = test_stat-0.003, y = 200, label = "Observed Statistics", vjust = -1)+
+  labs(title = "Model 3: Low Birth Weight Proportion")
+
+grid.arrange(p1,p2)
+
+```
+
+
+
+```{r}
+yrep2 = extract(my_mod2)[["log_weight_rep"]]
+yrep3 = extract(my_mod3)[["log_weight_rep"]]
+
+
+
+test_stat = log(median(ds$birthweight))
+
+test_mod_2 = rep(NA,3000)
+
+for (i in 1:3000){
+  test_mod_2[i] = median(yrep2[i, ])
+}
+
+test_mod_3 = rep(NA,3000)
+
+for (i in 1:3000){
+  test_mod_3[i] = median(yrep3[i, ])
+}
+
+
+p1 = ggplot(mapping = aes(test_mod_2))+
+  geom_histogram()+
+  geom_vline(xintercept = test_stat)+
+  xlab("value")+
+  annotate("text", x = test_stat-0.003, y = 10, label = "Observed Statistics", vjust = -1)+
+  labs(title = "Model 2: Median")
+
+
+
+p2 = ggplot(mapping = aes(test_mod_3))+
+  geom_histogram()+
+  geom_vline(xintercept = test_stat)+
+  xlab("value")+
+  annotate("text", x = test_stat-0.003, y = 10, label = "Observed Statistics", vjust = -1)+
+  labs(title = "Model 3: Median")
+
+grid.arrange(p1,p2)
+
+```
+
+And we compare loo elpd.
+
+```{r}
+loglik2 <- extract(my_mod2)[["log_lik"]]
+loglik3 <- extract(my_mod3)[["log_lik"]]
+
+loo2 <- loo(loglik2, save_psis = TRUE)
+loo3 <- loo(loglik3, save_psis = TRUE)
+
+loo_compare(loo2, loo3)
+
+```
+
+Looking at posterior predictive check, we do not see any big visual difference. However, from comparing loo elpd, model 3, with two new covariates, performed better than model 2. However, we see that difference is smaller between model 2 and model 3, compared to the difference in model 1 and model 2. Hence, the improvmenet in performance may only have been marginal. 
+
