@@ -11,7 +11,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
- Introduction
+# Introduction
 
 This lab will be looking at trying to replicate some of the visualizations in the lecture notes, involving prior and posterior predictive checks, and LOO model comparisons. 
 
@@ -21,7 +21,7 @@ The dataset is a 0.1% of all births in the US in 2017. I've pulled out a few dif
 
 Read it in, along with all our packages. 
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 library(tidyverse)
 library(here)
 # for bayes stuff
@@ -179,7 +179,7 @@ There are 313 cases of low birth weight.
 
 We want to see if Black Americans are more at risk for low birth weight. 
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 temp = table(ifelse(ds$Black == "Y", "Black", "Non-Black"), 
              ifelse(ds$low.birth == "Y", "Low Birth Weight", "No Low Birth Weight"))
 
@@ -213,7 +213,7 @@ We see that in percentage, low birth weight happened more frequently for Black A
 
 We print out the two-way table for race and low birth weight. 
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 temp = table(ifelse(ds$Black == "Y", "Black", "Non-Black"), 
              ifelse(ds$low.birth == "Y", "Low Birth Weight", "No Low Birth Weight"))
 
@@ -287,18 +287,35 @@ beta_1 = rnorm(1000, mean =0,sd= 1)
 beta_2 = rnorm(1000,mean=0,sd=1)
 sigma = abs(rnorm(1000,mean=0,sd=1))
 
-prior_check = rnorm(1000, mean = beta_1+beta_2*scale(log(ds$gest))[1:1000], sd = sigma)
 
-hist(prior_check, xlab = "Log(Weight)", 
-     main = "Prior Predictive Check", breaks = 20)
+prior_check = list()
+for (i in 1:1000){
+  prior_check[[i]] = rnorm(nrow(ds), 
+                           mean = beta_1[i]+beta_2[i]*scale(log(ds$gest)), 
+                           sd = sigma[i])
+}
+
+
+temp = data.frame(value = unlist(prior_check))
+
+ggplot(data = temp, aes(x = value))+
+  geom_histogram(binwidth = 0.5)+
+  xlab("Log(Weight)")+
+  ylab("Frequency")+
+  labs(title = "Prior Predictive Check with Log Birth Weight and Gestational Age")+
+  theme_bw()
 ```
 
 
-We plot the first ten data points. 
+We plot the first 10 samples from the prior predictive distribution. 
 ```{r}
-plot(prior_check[1:10]~scale(log(ds$gest))[1:10], 
-     xlab=("Log Gestational Age(Standardized)"), ylab=("Log Birth Weight"),
-     main=("Log Birth Weight and Gestational Age(Prior Predictive Check)"))
+par(mfrow=c(2,5))
+for (i in 1:10){
+  hist(prior_check[[i]], main = i, 
+       xlab = "log(weight)")
+}
+
+par(mfrow=c(1,1))
 ```
 
 
@@ -319,11 +336,11 @@ stan_data <- list(N = nrow(ds),
 
 Now fit the model
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 mod1 <- stan(data = stan_data, 
              file = here("simple_weight.stan"),
              iter = 500,
-             seed = 243)
+             seed = 243, refresh = 0)
 ```
 
 ```{r}
@@ -347,7 +364,8 @@ We can also plot the posterior estimates.
 post_samples = extract(mod1)
 
 
-hist(exp(post_samples[["beta"]][,1]+((log(37)-mean(log(ds$gest)))/sd(log(ds$gest)))*post_samples[["beta"]][,2]), 
+hist(exp(post_samples[["beta"]][,1]+
+           ((log(37)-mean(log(ds$gest)))/sd(log(ds$gest)))*post_samples[["beta"]][,2]), 
      xlab = "Posterior Samples",
      ylab = "Frequency", 
      main = "Posterior Estimates for Gestational Week = 37")
@@ -361,7 +379,7 @@ Write a stan model to run Model 2, and run it.
 My stan file is in outside the all the folders in my github. You will find a file named model_2_week_6.stan in my github. 
 
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 ds$log_weight = log(ds$birthweight)
 ds$log_gest_c = (log(ds$gest) - mean(log(ds$gest)))/sd(log(ds$gest))
 # put into a list
@@ -374,7 +392,7 @@ stan_data <- list(N = nrow(ds),
 my_mod2 = stan(data = stan_data, 
              file = here("model_2_week_6.stan"),
              iter = 1500,
-             seed = 243)
+             seed = 24993, refresh = 0)
 ```
 
 
@@ -393,7 +411,7 @@ My result
 summary(my_mod2)$summary[c("beta[1]", "beta[2]","beta[3]", "beta[4]", "sigma"),]
 ```
 
-The results are indeed similar. 
+The results are indeed similar(with the exception of flipped coefficient for beta[2] and beta[3]). 
 
 # PPCs
 
@@ -406,7 +424,8 @@ yrep1 <- extract(mod1)[["log_weight_rep"]]
 yrep2 <- extract(mod2)[["log_weight_rep"]] 
 dim(yrep1)
 samp100 <- sample(nrow(yrep1), 100)
-ppc_dens_overlay(y, yrep1[samp100, ])  + ggtitle("distribution of observed versus predicted birthweights")
+ppc_dens_overlay(y, yrep1[samp100, ])  + 
+  ggtitle("distribution of observed versus predicted birthweights")
 ```
 
 For each posterior sample, we create a data set of length 3842. We have 1000 posterior samples, so we obtain 1000 data set of of length 3842. 
@@ -417,7 +436,7 @@ Make a similar plot to the one above but for model 2, and **not** using the baye
 
 
 
-```{r}
+```{r, warning = FALSE,message = FALSE}
 set.seed(32222)
 samp100 = sample(nrow(yrep2), 100)
 
@@ -447,9 +466,11 @@ p
 
 And we can compare with the output using ppc_dens_overlay
 ```{r}
-ppc_dens_overlay(y, yrep2[samp100, ])  + ggtitle("distribution of observed versus predicted birthweights")
+ppc_dens_overlay(y, yrep2[samp100, ])+
+  ggtitle("distribution of observed versus predicted birthweights")
 
 ```
+
 ## Test statistics
 
 We can also look at some summary statistics in the PPD versus the data, again either using `bayesplot` -- the function of interest is `ppc_stat` or `ppc_stat_grouped` -- or just doing it ourselves using ggplot. 
@@ -465,8 +486,11 @@ ppc_stat_grouped(ds$log_weight, yrep1, group = ds$preterm, stat = 'median')
 Use a test statistic of the proportion of births under 2.5kg. Calculate the test statistic for the data, and the posterior predictive samples for both models, and plot the comparison (one plot per model).
 
 
-```{r}
+```{r, warning = FALSE, message=FALSE}
 test_stat = length(which(ds$low.birth =="Y"))/nrow(ds)
+
+#the observed test statistic is
+test_stat
 
 test_mod_1 = rep(NA,1000)
 
@@ -486,7 +510,8 @@ p1 = ggplot(mapping = aes(test_mod_1))+
   geom_vline(xintercept = test_stat)+
   xlim(c(0.08, 0.13))+
   xlab("value")+
-  annotate("text", x = test_stat+0.003, y = 10, label = "Observed Statistics", vjust = -1, color = "red")+
+  annotate("text", x = test_stat+0.003, y = 10, 
+           label = "Observed Statistics", vjust = -1, color = "red")+
   labs(title = "Model 1: Low Birth Weight Proportion")
 
 
@@ -496,7 +521,8 @@ p2 = ggplot(mapping = aes(test_mod_2))+
   geom_vline(xintercept = test_stat)+
   xlim(c(0.08, 0.13))+
   xlab("value")+
-  annotate("text", x = test_stat+0.003, y = 10, label = "Observed Statistics", vjust = -1, color = "red")+
+  annotate("text", x = test_stat+0.003, y = 10, 
+           label = "Observed Statistics", vjust = -1, color = "red")+
   labs(title = "Model 2: Low Birth Weight Proportion")
 
 grid.arrange(p1,p2)
@@ -547,7 +573,29 @@ Create your own PIT histogram "from scratch" for Model 2.
 
 
 ```{r}
+temp = rep(NA, nrow(ds))
 
+for (i in 1:nrow(ds)){
+  temp_count = 0
+  for (j in 1:500){
+    if (ds$log_weight[i]<=yrep2[j,][i]){
+      temp_count=temp_count+1
+    }
+  }
+  temp[i] = temp_count/500
+}
+
+
+p = ggplot(data = as.data.frame(temp), aes(x = temp))+
+  geom_histogram(aes(y = ..density..))+
+  geom_density(aes(color = "red"))+
+  labs(title = "Probability Integral Transform")
+
+
+
+
+p
+  
 ```
 
 ## Question 8
@@ -572,7 +620,7 @@ stan_data <- list(N = nrow(ds),
 my_mod3 = stan(data = stan_data, 
              file = here("model_3_week_6.stan"),
              iter = 1500,
-             seed = 243)
+             seed = 24323, refresh = 0)
 ```
 
 
@@ -610,7 +658,8 @@ p1 = ggplot(mapping = aes(test_mod_2))+
   geom_histogram()+
   geom_vline(xintercept = test_stat)+
   xlab("value")+
-  annotate("text", x = test_stat-0.003, y = 200, label = "Observed Statistics", vjust = -1)+
+  annotate("text", x = test_stat-0.003, y = 200, 
+           label = "Observed Statistics", vjust = -1)+
   labs(title = "Model 2: Low Birth Weight Proportion")
 
 
@@ -619,7 +668,8 @@ p2 = ggplot(mapping = aes(test_mod_3))+
   geom_histogram()+
   geom_vline(xintercept = test_stat)+
   xlab("value")+
-  annotate("text", x = test_stat-0.003, y = 200, label = "Observed Statistics", vjust = -1)+
+  annotate("text", x = test_stat-0.003, y = 200, 
+           label = "Observed Statistics", vjust = -1)+
   labs(title = "Model 3: Low Birth Weight Proportion")
 
 grid.arrange(p1,p2)
@@ -653,7 +703,8 @@ p1 = ggplot(mapping = aes(test_mod_2))+
   geom_histogram()+
   geom_vline(xintercept = test_stat)+
   xlab("value")+
-  annotate("text", x = test_stat-0.003, y = 10, label = "Observed Statistics", vjust = -1)+
+  annotate("text", x = test_stat-0.003, y = 10, 
+           label = "Observed Statistics", vjust = -1)+
   labs(title = "Model 2: Median")
 
 
@@ -662,7 +713,8 @@ p2 = ggplot(mapping = aes(test_mod_3))+
   geom_histogram()+
   geom_vline(xintercept = test_stat)+
   xlab("value")+
-  annotate("text", x = test_stat-0.003, y = 10, label = "Observed Statistics", vjust = -1)+
+  annotate("text", x = test_stat-0.003, y = 10, 
+           label = "Observed Statistics", vjust = -1)+
   labs(title = "Model 3: Median")
 
 grid.arrange(p1,p2)
@@ -671,7 +723,7 @@ grid.arrange(p1,p2)
 
 And we compare loo elpd.
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 loglik2 <- extract(my_mod2)[["log_lik"]]
 loglik3 <- extract(my_mod3)[["log_lik"]]
 
@@ -682,5 +734,5 @@ loo_compare(loo2, loo3)
 
 ```
 
-Looking at posterior predictive check, we do not see any big visual difference. However, from comparing loo elpd, model 3, with two new covariates, performed better than model 2. However, we see that difference is smaller between model 2 and model 3, compared to the difference in model 1 and model 2. Hence, the improvmenet in performance may only have been marginal. 
+Looking at posterior predictive check, we do not see any big visual difference. However, from comparing loo elpd, model 3, with two new covariates, performed better than model 2. However, we see that difference is smaller between model 2 and model 3, compared to the difference in model 1 and model 2. Hence, the improvement in performance may only have been marginal. 
 
