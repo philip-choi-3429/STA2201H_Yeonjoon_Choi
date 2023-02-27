@@ -519,7 +519,7 @@ p1 = ggplot(mapping = aes(test_mod_1))+
 p2 = ggplot(mapping = aes(test_mod_2))+
   geom_histogram()+
   geom_vline(xintercept = test_stat)+
-  xlim(c(0.08, 0.13))+
+  xlim(c(0.06, 0.13))+
   xlab("value")+
   annotate("text", x = test_stat+0.003, y = 10, 
            label = "Observed Statistics", vjust = -1, color = "red")+
