@@ -1,0 +1,13 @@
+---
+title: "Sta2201 Lab 10"
+author: "Yeonjoon Choi"
+date: "2023-03-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
